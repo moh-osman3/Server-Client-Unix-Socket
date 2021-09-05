@@ -12,17 +12,14 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
 
-#include "api.h"
-
-#ifndef SOCK_PATH
-#define SOCK_PATH "unix_socket"
-
+#include "include/sock.h"
 
 
 /*
@@ -41,10 +38,26 @@
  *****************************************************************************
  */
 
-bool
+void
 DBServer_HandleClient(int socket)
 {
-    return;
+   char buf[100];
+   char *rec = "received!";
+   
+   if (recv(socket, (void *) buf, sizeof buf, 0) == -1) {
+      fprintf(stdout, "%s:%d: failed to receive message from client.\n",
+              __FUNCTION__, __LINE__);
+      return;
+   }
+
+   fprintf(stdout, "%s:%d: message from client: %s\n",
+           __FUNCTION__, __LINE__, (char *) buf);
+   
+   if (send(socket, (void *) rec, strlen(rec), 0) == -1) {
+      fprintf(stdout, "%s:%d: failed to send response to client.\n",
+              __FUNCTION__, __LINE__);
+      return;
+   }
 }
 
 /*
@@ -70,7 +83,7 @@ DBServer_LoadServer()
    sock = socket(AF_UNIX, SOCK_STREAM, 0);
 
    if (sock == -1) {
-      fprintf(1, "%s:%d: failed to create unix socket.\n",
+      fprintf(stdout, "%s:%d: failed to create unix socket.\n",
              __FUNCTION__, __LINE__);
       return -1;
    }
@@ -80,18 +93,18 @@ DBServer_LoadServer()
     * unlink sun_path to remove the socket if it already exists.
     * This must be done before calling bind()
     */
-   unlink(local.sun_path);
-   len = strlen(local.sun_path) + sizeof(local.sun_family) + 1;
-   if (bind(server_socket, (struct sockaddr *)&local, len) == -1) {
-       fprintf(1, "%s:%d: Socket failed to bind.\n",
-               __FUNCTION__, __LINE__);
-       return -1;
+   unlink(addr.sun_path);
+   len = strlen(addr.sun_path) + sizeof(addr.sun_family) + 1;
+   if (bind(sock, (struct sockaddr *)&addr, len) == -1) {
+      fprintf(stdout, "%s:%d: Socket failed to bind.\n",
+              __FUNCTION__, __LINE__);
+      return -1;
    }
 
-   if (listen(server_socket, 5) == -1) {
-       fprintf(1, "%s:%d: Failed to listen on socket.\n",
-               __FUNCTION__, __LINE__);
-       return -1;
+   if (listen(sock, 5) == -1) {
+      fprintf(stdout, "%s:%d: Failed to listen on socket.\n",
+              __FUNCTION__, __LINE__);
+      return -1;
    }
 
    return sock;
@@ -103,20 +116,23 @@ main(void)
 {
    int client_socket;
    struct sockaddr_un remote;
-   size_t remote_len = sizeof(remote);
+   uint remote_len = sizeof(remote);
    int server_socket = DBServer_LoadServer();
    
    if (server_socket == -1) {
-       fprintf(1, "%s:%d: error loading server.\n",
-               __FUNCTION__, __LINE__);
+      fprintf(stdout, "%s:%d: error loading server.\n",
+              __FUNCTION__, __LINE__);
+      exit(1);
    }
 
    for (;;) {
       client_socket = accept(server_socket, (struct sockaddr *) &remote, &remote_len);
       if (client_socket == -1) {
-          fprintf(1, "%s:%d: error accepting client request.\n",
-                  __FUNCTION__, __LINE__);
-          
+         fprintf(stdout, "%s:%d: error accepting client request.\n",
+                 __FUNCTION__, __LINE__);
+         exit(1);
       }
+
+      DBServer_HandleClient(client_socket);
    }
 }
