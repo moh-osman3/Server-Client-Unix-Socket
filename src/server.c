@@ -18,9 +18,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include "include/sock.h"
-
+#include "include/api.h"
 
 /*
  *****************************************************************************
@@ -41,24 +42,75 @@
 void
 DBServer_HandleClient(int socket)
 {
-   char buf[100];
-   char *rec = "received!";
-   
-   if (recv(socket, (void *) buf, sizeof buf, 0) == -1) {
-      fprintf(stdout, "%s:%d: failed to receive message from client.\n",
-              __FUNCTION__, __LINE__);
-      return;
-   }
+   bool listen = true;
+   char *recStr = "received";
+   while (listen) {
+      Message send_msg;
+      send_msg.status = DB_OK;
+      send_msg.length = strlen(recStr);
+      strncpy(send_msg.payload, recStr, send_msg.length);
+      /*
+       * BUG: make sure send_msg.length is less than MAX_BUF_SZ.
+       * This code will be changed, so keep in mind.
+       */
+      send_msg.payload[send_msg.length] = '\0';
 
-   fprintf(stdout, "%s:%d: message from client: %s\n",
-           __FUNCTION__, __LINE__, (char *) buf);
+      Message rec_msg; 
+      if (recv(socket, &rec_msg, sizeof rec_msg - 1, 0) == -1) {
+         fprintf(stdout, "%s:%d: failed to receive message from client.\n",
+                 __FUNCTION__, __LINE__);
+         return;
+      }
+
+      /*
+       * Check the status from the client.
+       */ 
+      switch (rec_msg.status) {
+         case DB_OK:
+            /*
+             * Parse request and execute request.
+             * Send back response.
+             */
+            if (recv(socket, (void *) rec_msg.payload, rec_msg.length, 0) == -1) {
+               fprintf(stdout, "%s:%d: failed to receive message from client.\n",
+                       __FUNCTION__, __LINE__);
+               return;
+            }
+            fprintf(stdout, "%s:%d: message from client: %s\n",
+                    __FUNCTION__, __LINE__, rec_msg.payload);
+            goto send_response_to_client;
+             
+         case DB_CONTINUE:
+            /*
+             * Receiving long message (like file),
+             * so continue to receive msg, no need
+             * to parse command.
+             */
+            goto send_response_to_client;
+         case DB_ERROR:
+            /*
+             * Shutdown. Make sure to save db on server
+             * side, so client data persists
+             */
+            goto send_response_to_client;
+      }
+
    
-   if (send(socket, (void *) rec, strlen(rec), 0) == -1) {
-      fprintf(stdout, "%s:%d: failed to send response to client.\n",
-              __FUNCTION__, __LINE__);
-      return;
+send_response_to_client:
+
+      if (send(socket, (void *) &send_msg, sizeof(send_msg) - 1, 0) == -1) {
+         fprintf(stdout, "%s:%d: failed to send response to client.\n",
+                 __FUNCTION__, __LINE__);
+         return;
+      }
+      if (send(socket, (void *) send_msg.payload, send_msg.length, 0) == -1) {
+         fprintf(stdout, "%s:%d: failed to send response to client.\n",
+                 __FUNCTION__, __LINE__);
+         return;
+      }
    }
 }
+
 
 /*
  *****************************************************************************
@@ -125,14 +177,11 @@ main(void)
       exit(1);
    }
 
-   for (;;) {
-      client_socket = accept(server_socket, (struct sockaddr *) &remote, &remote_len);
-      if (client_socket == -1) {
-         fprintf(stdout, "%s:%d: error accepting client request.\n",
-                 __FUNCTION__, __LINE__);
-         exit(1);
-      }
-
-      DBServer_HandleClient(client_socket);
+   client_socket = accept(server_socket, (struct sockaddr *) &remote, &remote_len);
+   if (client_socket == -1) {
+      fprintf(stdout, "%s:%d: error accepting client request.\n",
+              __FUNCTION__, __LINE__);
+      exit(1);
    }
+   DBServer_HandleClient(client_socket);
 }

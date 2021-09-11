@@ -9,6 +9,19 @@
 #include <string.h>
 
 #include "include/sock.h"
+#include "include/api.h"
+
+/*
+ *****************************************************************************
+ * DBClient_LoadClient --
+ *
+ * Establishes unix socket for client and connects to server.
+ *
+ * PARAMS: none
+ * RETURNS: fd of socket on success
+ *          -1 on failure
+ *****************************************************************************
+ */
 
 int
 DBClient_LoadClient()
@@ -45,7 +58,7 @@ main(void)
 {
    int client_socket;
    char *dummy = "hello";
-   char buf[100];
+   char buf[MAX_BUF_SZ];
    
    client_socket = DBClient_LoadClient();
    if (client_socket == -1) {
@@ -54,19 +67,49 @@ main(void)
       exit(1);
    }
    
-   while(printf("> "), fgets(buf, 100, stdin), !feof(stdin)) {
-      if (send(client_socket, (void *) buf, strlen(buf), 0) == -1) {
+   while(printf("> "), fgets(buf, MAX_BUF_SZ, stdin), !feof(stdin)) {
+      Message send_msg;
+      Message rec_msg;
+      send_msg.status = DB_OK;
+      send_msg.length = strlen(buf);
+      strncpy(send_msg.payload, buf, send_msg.length);
+      send_msg.payload[send_msg.length - 1] = '\0';
+
+      if (send(client_socket, &send_msg, sizeof(send_msg) - 1, 0) == -1) {
+         fprintf(stdout, "%s:%d: failed to send message.\n",
+                 __FUNCTION__, __LINE__);
+         exit(1);
+      }
+      printf("client sent mess\n");
+      if (send(client_socket, send_msg.payload, send_msg.length, 0) == -1) {
          fprintf(stdout, "%s:%d: failed to send message.\n",
                  __FUNCTION__, __LINE__);
          exit(1);
       }
       
-      if (recv(client_socket, (void *) buf, sizeof buf, 0) == -1) {
+      if (recv(client_socket, (void *) &rec_msg, sizeof(rec_msg) - 1, 0) == -1) {
          fprintf(stdout, "%s:%d: failed to receive message from server.\n",
                  __FUNCTION__, __LINE__);
          exit(1);
       }
-      fprintf(stdout, "buf: %s\n", (char *) buf);
+ 
+      switch(rec_msg.status) {
+         case DB_OK:
+         case DB_CONTINUE:
+            if (recv(client_socket, (void *) rec_msg.payload, rec_msg.length, 0) == -1) {
+               fprintf(stdout, "%s:%d: failed to receive message from server.\n",
+                       __FUNCTION__, __LINE__);
+               exit(1);
+            }
+            break;
+         case DB_ERROR:
+            /*
+             * TODO: Cleanup socket.
+             */
+            break;
+      }
+      fprintf(stdout, "Message from server: %s\n", (char *) rec_msg.payload);
+      buf[0] = '\0';
    }
    
 }
